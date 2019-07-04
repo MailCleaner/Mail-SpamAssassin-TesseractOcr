@@ -38,7 +38,7 @@ Enable in your SpamAssassin config:
 
   loadplugin Mail::SpamAssassin::Plugin::TesseractOcr
 
-Override default settings (TesseractOcr.pm: line 106):
+Override default settings:
 
   ifplugin Mail::SpamAssassin::Plugin::TesseractOcr
     tocr_setting_name   value
@@ -70,14 +70,13 @@ package Mail::SpamAssassin::Plugin::TesseractOcr;
 use strict;
 use warnings;
 
-use POSIX qw(strftime);
+use POSIX qw( strftime );
 use Time::HiRes qw( gettimeofday tv_interval );
 use Mail::SpamAssassin;
 use Mail::SpamAssassin::Logger;
 use Mail::SpamAssassin::Util;
 use Mail::SpamAssassin::Timeout;
-use Mail::SpamAssassin::Message::Node qw(find_parts);
-use Image::OCR::Tesseract;
+use Mail::SpamAssassin::Message::Node qw( find_parts );
 
 use vars qw(@ISA);
 @ISA = qw(Mail::SpamAssassin::Plugin);
@@ -85,191 +84,397 @@ use vars qw(@ISA);
 our $initialized = 0;
 our ($tmpfile, $tmpdir);
 
+# Verify non-perl dependencies
+our $TESSERACT = Mail::SpamAssassin::Util::find_executable_in_env_path('tesseract') or die "Could not find 'tesseract' executable. You may need to install this package.\n";
+our $CONVERT = Mail::SpamAssassin::Util::find_executable_in_env_path('convert') or die "Could not find 'convert' executable. You may need to install this package.\n";
+
 sub new {
     my $class = shift;
     my $mailsa = shift;
 
     my $date = strftime "%Y-%m-%d %H:%M", localtime;
-    debuglog("Initiated TesseractOcr Plugin $date");
-
-    # Verify non-perl dependencies
-    use File::Which 'which';
-    which('tesseract') || die "Could not find 'tesseract' executable. You may need to install this package.\n";
-    which('convert') || die "Could not find 'convert' executable. You may need to install this package.\n";
+    dbg("TessaractOcr: Initiated Plugin $date");
 
     $class = ref($class) || $class;
     my $self = $class->SUPER::new($mailsa);
     bless($self, $class);
 
-    if (!$initialized) {
-        # Default settings, in case not defined in TesseractOcr.cf
-        my %defaults = (
-            tocr_timeout => 15,
-            tocr_skip_jpg => 0,
-            tocr_skip_gif => 0,
-            tocr_skip_bmp => 0,
-            tocr_skip_png => 0,
-            tocr_skip_tiff => 0,
-            tocr_min_size => 1024,
-            tocr_max_size => 4096000,
-            tocr_min_x => 32,
-            tocr_min_y => 32,
-            tocr_min_area => 256,
-            tocr_max_x => 2048,
-            tocr_max_y => 2048,
-            tocr_max_area => 2073600, #1920*1080
-        );
-
-        # Filling in missing settings
-        foreach my $key (keys %defaults) {
-            if (!defined $self->{main}->{conf}->{$key}) {
-                $self->{main}->{conf}->{$key} = $defaults{$key};
-                debuglog("$key is not defined in config file, using default value $self->{main}->{conf}->{$key}.");
-            } else {
-                debuglog("$key is defined as $self->{main}->{conf}->{$key} in config file.");
-            }
-        }
-
-        $initialized = 1;
-    }
+    $self->set_config($mailsa->{conf});
 
     return $self;
 }
 
-sub debuglog {
-    my $message = shift;
-    Mail::SpamAssassin::Logger::log_message("debug",("TesseractOcr: $message"));
-}
+sub set_config {
+    my ($self, $conf) = @_;
+    my @cmds;
 
-sub infolog {
-    my $message = shift;
-    Mail::SpamAssassin::Logger::log_message("info",("TesseractOcr: $message"));
-}
+=head1 USER OPTIONS
 
-sub parse_config {
-    my ($self, $opts) = @_;
+=item tocr_enabled (0|1)                    (default: 1)
 
-    if ($opts->{line} =~ m/^tocr_/) {
-        $self->{main}->{conf}->{$opts->{line}} = $opts->{value};
-        $self->inhibit_further_callbacks();
-    } else {
-        return 0;
-    }
+Whether to use TesseractOcr, if it is available.
 
-    return 1;
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_enable',
+        default => 1,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+=item tocr_msg_timeout                          (default: 15)
+
+Timeout duration for an entire message.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_msg_timeout',
+        default => 15,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_img_timeout                          (default: 5)
+
+Timeout duration for a single image. Used once when converting the
+image and once when scanning the image.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_img_timeout',
+        default => 5,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_skip_(jpg|png|gif|bmp|tif|pdf)       (default: 0)
+
+Disable scanning of individual image types.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_skip_jpg',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+    push (@cmds, {
+        setting => 'tocr_skip_png',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+    push (@cmds, {
+        setting => 'tocr_skip_gif',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+    push (@cmds, {
+        setting => 'tocr_skip_bmp',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+    push (@cmds, {
+        setting => 'tocr_skip_tif',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+    push (@cmds, {
+        setting => 'tocr_skip_pdf',
+        default => 0,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+=item tocr_min_size                             (default: 1024)
+
+Minimum image size (bytes). Small images are unlikely to contain
+OCR-friendly text
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_min_size',
+        default => 1024,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_max_size                             (default: 4096000)
+
+Maximum image size (bytes). Large images can take a long time to
+OCR and are also somewhat less likely to contain text.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_max_size',
+        default => 4096000,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_min_(x|y)                            (default: 16)
+
+Minimum height or width of an image (pixels). Narrow  images are
+unlikely to contain OCR-friendly text.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_min_x',
+        default => 16,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+    push (@cmds, {
+        setting => 'tocr_min_y',
+        default => 16,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_max_(x|y)                            (default: 2048)
+
+Maximum image heigh or width (pixels). Large images can take a long
+time to OCR and are also somewhat less likely to contain text.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_max_x',
+        default => 2048,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+    push (@cmds, {
+        setting => 'tocr_max_y',
+        default => 2048,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_min_area                         (default: 512)
+
+Minimum image area (pixels). Small images are unlikely to contain
+OCR-friendly text.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_min_area',
+        default => 512,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+=item tocr_max_area                         (default: 2073600)
+
+Maximum image area (pixels). Large images can take a long time to
+OCR and are also somewhat less likely to contain text.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_max_area',
+        default => 2073600,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
+    });
+
+    $conf->{parser}->register_commands(\@cmds);
 }
 
 sub post_message_parse {
     my ($self, $pms) = @_;
-    my $msg = $pms->{'message'};
+
+    unless ($self->{main}->{conf}->{tocr_enable}) {
+        dbg("TesseractOcr: not enabled");
+        return 0;
+    }
 
     # Setup a timeout
     my $end;
     my $begin = [gettimeofday];
-    my $t = Mail::SpamAssassin::Timeout->new({ secs => $self->{base}->{conf}->{tocr_timeout} });
+    my $t = Mail::SpamAssassin::Timeout->new({ secs => $self->{main}->{conf}->{tocr_msg_timeout} });
 
     # Execute within that timeout
     $t->run(sub {
-        $end = tesseract_do($self, $msg);
+        $end = tesseract_do($self, $pms);
     });
 
     # Handle timout
     if ($t->timed_out()) {
-        infolog("Tesseract scan timed out");
+        dbg("TesseractOcr: Scan timed out");
         my ($ret, $pid) = kill_pid();
-        if (defined $tmpdir) {
-            if (defined $tmpfile) {
-                unlink $tmpfile;
-                $tmpfile = undef;
-            }
-            rmdir $tmpdir;
-            $tmpdir = undef;
-        }
+        clean_up();
         if ($ret > 0) {
-            debuglog("Successfully killed PID $pid");
+            dbg("TesseractOcr: Successfully killed PID $pid");
         } elsif ($ret < 0) {
-            debuglog("No processes left... exiting");
+            dbg("TesseractOcr: No processes left... exiting");
         } else {
-            infolog("Failed to kill PID $pid, stale process!");
+            dbg("TesseractOcr: Failed to kill PID $pid, stale process!");
         }
         return 0;
     }
 
     # Report scantime
     my $duration = tv_interval($begin, [gettimeofday]);
-    debuglog("Tesseract completed in $duration seconds.");
+    dbg("TesseractOcr: Completed in $duration seconds.");
 
     return $end;
 }
 
 sub tesseract_do {
-    my ($self, $msg ) = @_;
+    my ($self, $pms) = @_;
+    my $msg = $pms->{'message'};
 
-    debuglog("Searching for images in messages.");
+    Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode($self);
 
+    dbg("TesseractOcr: Searching for images in messages.");
     my @types = (
         qr(^image\b)i,
         qr(^Application/Octet-Stream)i,
         qr(application/pdf)i
     );
 
-    my $unnamed = 0;
-
+    my $name_counter = 0;
     foreach my $type ( @types ) {
         foreach my $p ( $msg->find_parts($type) ) {
-            my ($fname, $ext);
-            if (defined $p->{'name'}) {
-                $fname = $p->{'name'};
-            } else {
-                $fname = "unnamed" . $unnamed++;
-            }
-            my $ctype = $p->{'type'};
-            infolog("TesseractOcr found $fname of type $ctype matching image pattern $type.");
+            my $fname = $p->{'name'};
+            dbg("TesseractOcr: Found $fname of type $p->{'type'} matching image pattern $type.");
 
             my $d = $p->decode();
+            my $ext;
             unless ( $ext = tesseract_type($self, $d) ) {
-                infolog("Skipping $fname: Unrecognized file format");
+                dbg("TesseractOcr: Skipping $p->{'name'}: Unrecognized file format");
                 next;
             }
 
             if ( my $skip = tesseract_skip($self, $d, $ext) ) {
-                infolog("Skipping $fname: $skip");
+                dbg("TesseractOcr: Skipping $p->{'name'}: $skip");
                 next;
             }
 
-            infolog("Scanning $fname...");
-
             # Get a unique path
-            $tmpdir = Mail::SpamAssassin::Util::secure_tmpdir() || return 0;
-            my $fullpath = Mail::SpamAssassin::Util::untaint_file_path($tmpdir . "/" . $fname);
-            my $unique = 0;
-            while (-e $fullpath) {
-                $fullpath = Mail::SpamAssassin::Util::untaint_file_path($tmpdir . "/" . chr(65+$unique++) . $fname);
-            }
-            debuglog("Storing $fname to $fullpath for scanning.");
+            $tmpfile = "$name_counter.$ext";
+            $name_counter++;
+            $tmpdir = Mail::SpamAssassin::Util::secure_tmpdir() or return 0;
+            my $fullpath = Mail::SpamAssassin::Util::untaint_file_path(File::Spec->catfile($tmpdir, $tmpfile));
+            dbg("TesseractOcr: Storing $p->{'name'} to $fullpath for scanning.");
 
             # Save tmp file
             unless (open PICT, ">$fullpath") {
-                infolog("Cannot open $fullpath for writing.");
+                dbg("TesseractOcr: Cannot open $fullpath for writing.");
+                clean_up();
+                next;
             }
-            $tmpfile = $fname;
             binmode PICT;
-            print PICT $d;
+            print PICT $d or dbg("TesseractOcr: Cannot write $fullpath: $!");
             close PICT;
 
-            # Scan tmp file
-            my $content = Image::OCR::Tesseract::get_ocr($fullpath);
+            Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode($self);
+            my $timer = Mail::SpamAssassin::Timeout->new( { secs => $self->{main}->{conf}->{tocr_img_timeout} } );
+            # Convert to TIF, if not already
+            unless ($ext =~ 'tif') {
+                # CONVERT
+                my $out = "$fullpath.tif";
+                $tmpfile .= ".tif";
+
+                dbg("TesseractOcr: Converting $fullpath to $out");
+                my @args = ( $fullpath, '-compress','none','+matte', $out );
+
+                Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode();
+                my $pid;
+                my ($line,$inbuf);
+                my $err = $timer->run_and_catch(sub {
+                    $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*CONVERT, undef, 1, $CONVERT, @args);
+                    if (!defined $pid) {
+                        return "Failed to open pipe for convert command";
+                    } else {
+                        while ($line = read(CONVERT,$inbuf,8192)) {
+                            dbg("TesseractOcr: CONVERT DEBUG $line");
+                        }
+                        unless (defined $line) {
+                            return "TesseractOcr: Error reading from pipe: $!";
+                        }
+
+                        my $errno = 0;
+                        close CONVERT or $errno = $!;
+                        if (Mail::SpamAssassin::Util::proc_status_ok($?,$errno)) {
+                            dbg("TesseractOcr: convert pid $pid finished successfully.");
+                            return 1;
+                        } elsif (Mail::SpamAssassin::Util::proc_status_ok($?,$errno,0,1)) {
+                            dbg("TesseractOcr: convert pid $pid finished: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
+                            return 1;
+                        } else {
+                            dbg("TesseractOcr: convert pid $pid failed: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
+                            return 0;
+                        }
+                    }
+                });
+                Mail::SpamAssassin::PerMsgStatus::leave_helper_run_mode($self);
+
+                if ($err) {
+                    dbg("TessoractOcr: Failed to convert $fullpath: $_");
+                    dbg("TessoractOcr: Removing unconverted file $fullpath");
+                    unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after failed conversion: $!");
+                    next;
+                } else {
+                    dbg("TessoractOcr: Successfully converted $fullpath to $out");
+                    dbg("TessoractOcr: Removing unconverted file $fullpath");
+                    unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after conversion: $!");
+                    $fullpath = $out;
+                }
+            }
+
+            # Scan TIF and render results
+            # SCAN
+            my ($pid, $content);
+            my @args = ( $fullpath, 'stdout' );
+            my $err = $timer->run_and_catch(sub {
+                my ($inbuf, $line);
+                $content = '';
+                $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*TESSERACT, undef, 1, $TESSERACT, @args);
+                if (!defined $pid) {
+                    return "Failed to open pipe for tesseract command";
+                } else {
+                    while ($line = read(TESSERACT,$inbuf,8192)) {
+                        $content .= $inbuf;
+                    }
+                    unless (defined $line) {
+                        return "TesseractOcr: Error reading from pipe: $!";
+                    }
+
+                    if ($content eq '') {
+                        dbg("TesseractOcr: No content discovered");
+                    }
+
+                    my $errno = 0;
+                    close TESSERACT or $errno = $!;
+                    if (Mail::SpamAssassin::Util::proc_status_ok($?,$errno)) {
+                        dbg("TesseractOcr: tesseract pid $pid finished successfully.");
+                    } elsif (Mail::SpamAssassin::Util::proc_status_ok($?,$errno,0,1)) {
+                        dbg("TesseractOcr: tesseract pid $pid finished: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
+                    } else {
+                        dbg("TesseractOcr: tesseract pid $pid failed: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
+                    }
+                }
+                });
+            Mail::SpamAssassin::PerMsgStatus::leave_helper_run_mode($self);
+            if ($timer->timed_out()) {
+                dbg("TesseractOcr: Per image timeout reached for $tmpfile");
+                cleanup();
+                next;
+            }
+
             if ($content) {
                 $p->set_rendered($content);
-                debuglog("Found content: $content");
+                dbg("TesseractOcr: Found content: $content");
             } else {
-                debuglog("No content discovered");
+                dbg("TesseractOcr: No text found.");
             }
-            debuglog("Cleaning temporary file: $fullpath");
-            unlink $fullpath;
-            rmdir $tmpdir;
-            $tmpfile = undef;
-            $tmpdir = undef;
+
+            # Clean up
+            dbg("TesseractOcr: Cleaning up temporary file: $fullpath");
+            clean_up();
 
         }
     }
@@ -280,22 +485,19 @@ sub tesseract_do {
 sub tesseract_type {
     my ($self, $d) = @_;
 
-    my ($w, $h);
     if ( substr($d,0,3) eq "\x47\x49\x46" ) {
         return 'gif';
     } elsif ( substr($d,0,2) eq "\xff\xd8" ) {
         return 'jpg';
     } elsif ( substr($d,0,4) eq "\x89\x50\x4e\x47" ) {
         return 'png';
-        ($w, $h) = unpack("NN",substr($d,16,8));
     } elsif ( substr($d,0,2) eq "BM" ) {
         return 'bmp';
-        ($w, $h) = unpack("VV",substr($d,18,8));
     } elsif (
         (substr($d,0,4) eq "\x4d\x4d\x00\x2a") ||
         (substr($d,0,4) eq "\x49\x49\x2a\x00")
             ) {
-        return 'tiff';
+        return 'tif';
     } elsif ( substr($d,0,5) eq "\x25\x50\x44\x46\x2d" ) {
         return 'pdf';
     } else {
@@ -312,9 +514,9 @@ sub tesseract_skip {
     }
 
     my $size = length($d);
-    if ($size <= $self->{main}->{conf}->{tocr_min_size}) {
+    if ($size < $self->{main}->{conf}->{tocr_min_size}) {
         return "Image filesize too small. $size < $self->{main}->{conf}->{'tocr_min_size'}";
-    } elsif ($size >= $self->{main}->{conf}->{tocr_max_size}) {
+    } elsif ($size > $self->{main}->{conf}->{tocr_max_size}) {
         return "Image filesize too large. $size > $self->{main}->{conf}->{'tocr_max_size'}";
     }
 
@@ -343,7 +545,7 @@ sub tesseract_skip {
             $pos += unpack("n",substr($d,$pos,2));
         }
         if ($pos > $size) {
-            return "Cannot determine geometry of JPEG.";
+            return "Cannot determine geometry of JPG.";
         } else {
             ($h,$w) = unpack("nn",substr($d,$pos+3,4));
         }
@@ -351,7 +553,7 @@ sub tesseract_skip {
         ($w, $h) = unpack("NN",substr($d,16,8));
     } elsif ( $ext eq 'bmp' ) {
         ($w, $h) = unpack("VV",substr($d,18,8));
-    } elsif ( $ext eq 'tiff' ) {
+    } elsif ( $ext eq 'tif' ) {
         my $worder = (substr($d,0,2) eq "\x4d\x4d") ? 0 : 1;
         my $offset = unpack($worder?"V":"N",substr($d,4,4));
         my $number = unpack($worder?"v":"n",substr($d,$offset,2)) - 1;
@@ -367,7 +569,7 @@ sub tesseract_skip {
             }
         }
         if ($h == 0 || $w == 0) {
-            return "Cannot determine geometry of TIFF.";
+            return "Cannot determine geometry of TIF.";
         }
     } elsif ( $ext eq 'pdf' ) {
         # Geometry rules do not apply to PDF
@@ -389,6 +591,24 @@ sub tesseract_skip {
     }
 
     return 0;
+}
+
+sub clean_up {
+    if (defined $tmpfile) {
+        my $fullpath = Mail::SpamAssassin::Util::untaint_file_path(File::Spec->catfile($tmpdir, $tmpfile));
+        dbg("TesseractOcr: Removing $fullpath");
+        if (-e $fullpath) {
+            unlink $fullpath or dbg("TesseractOcr: Failed to remove $tmpfile: $!");
+        }
+        $tmpfile = undef;
+    }
+    if (defined $tmpdir) {
+        if (-e $tmpdir) {
+            dbg("TesseractOcr: Removing $tmpdir");
+            rmdir $tmpdir or dbg("TesseractOcr: Failed to remove $tmpdir: $!");
+        }
+        $tmpdir = undef;
+    }
 }
 
 1;
