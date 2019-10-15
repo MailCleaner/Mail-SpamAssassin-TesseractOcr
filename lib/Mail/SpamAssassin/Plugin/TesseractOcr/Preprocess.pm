@@ -17,11 +17,11 @@ BEGIN {
 }
 
 sub convert {
-    my ($in, $out) = @_;
+    my ($self, $in, $out) = @_;
     if ( !defined($in) || !defined($out) ) {
         croak('arguments undefined.');
     }
-    my $pp = new();
+    my $pp = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->new();
     my $ii = $pp->loadImage($in);
     my $err = $pp->saveImage($out,$ii);
     $pp->releaseImage($ii);
@@ -29,11 +29,11 @@ sub convert {
 }
 
 sub preprocess {
-    my ($in, $out) = @_;
+    my ($self, $in, $out) = @_;
     if ( !defined($in) || !defined($out) ) {
         croak('arguments undefined.');
     }
-    my $pp = new();
+    my $pp = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->new();
     my $ii = $pp->loadImage($in);
 
     # TODO - All preprocessing steps

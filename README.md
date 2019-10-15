@@ -2,7 +2,7 @@
 
 Optical Character Recognition Plugin for SpamAssasin
 
-Version 1.1.0\-RC1
+Version 1.1.0
 
 ## SYNOPSIS
 

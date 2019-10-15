@@ -63,7 +63,7 @@ This program is released under the Apache Software License, Version 2.0
 
 =cut
 
-our $VERSION = '1.0.0';
+our $VERSION = '1.1.0';
 
 package Mail::SpamAssassin::Plugin::TesseractOcr;
 
