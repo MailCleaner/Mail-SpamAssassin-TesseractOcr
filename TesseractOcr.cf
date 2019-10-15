@@ -1,6 +1,7 @@
 ifplugin Mail::SpamAssassin::Plugin::TesseractOcr
 
 tocr_enable 1
+tocr_preprocess 1
 tocr_msg_timeout 15
 tocr_img_timeout 5
 tocr_skip_jpg 0
