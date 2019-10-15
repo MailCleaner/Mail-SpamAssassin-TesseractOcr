@@ -405,42 +405,6 @@ sub tesseract_do {
 
                     dbg("TesseractOcr: Converting $fullpath to $out");
                     $err = $timer->run_and_catch(Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess::convert($fullpath,$out);
-=pod
-                    $tmpfile .= ".tif";
-                    # OLD METHOD: Converting with ImageMagick
-                    my @args = ( $fullpath, '-compress','none','+matte', $out );
-
-                    Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode();
-                    my $pid;
-                    my ($line,$inbuf);
-                    $err = $timer->run_and_catch(sub {
-                        $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*CONVERT, undef, 1, $CONVERT, @args);
-                        if (!defined $pid) {
-                            return "Failed to open pipe for convert command";
-                        } else {
-                            while ($line = read(CONVERT,$inbuf,8192)) {
-                                dbg("TesseractOcr: CONVERT DEBUG $line");
-                            }
-                            unless (defined $line) {
-                                return "TesseractOcr: Error reading from pipe: $!";
-                            }
-
-                            my $errno = 0;
-                            close CONVERT or $errno = $!;
-                            if (Mail::SpamAssassin::Util::proc_status_ok($?,$errno)) {
-                                dbg("TesseractOcr: convert pid $pid finished successfully.");
-                                return 1;
-                            } elsif (Mail::SpamAssassin::Util::proc_status_ok($?,$errno,0,1)) {
-                                dbg("TesseractOcr: convert pid $pid finished: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
-                                return 1;
-                            } else {
-                                dbg("TesseractOcr: convert pid $pid failed: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
-                                return 0;
-                            }
-                        }
-                    });
-                    Mail::SpamAssassin::PerMsgStatus::leave_helper_run_mode($self);
-=end
                 }
             }
 
