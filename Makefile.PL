@@ -24,5 +24,6 @@ WriteMakefile(
     PMLIBDIRS       => [ 'lib' ],
     LIBS            => $libs,
     CCFLAGS         => $ccflags,
+    TYPEMAPS        => ['types.map'],
     dist            => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
 );

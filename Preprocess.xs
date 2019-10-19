@@ -1,12 +1,32 @@
+#ifndef __Inline_C
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include <EXTERN.h>
 #include <perl.h>
 #include <XSUB.h>
+#ifdef __cplusplus
+}
+#endif
+
+/*
 #define NEED_newRV_noinc
 #define NEED_sv_2pv_nolen
-#include <cv.h>
-#include <highgui.h>
+*/
+#define NEED_sv_2pv_nolen_GLOBAL
+#include "./ppport.h"
+
+#endif /* __Inline_C */
+
+#undef do_open
+#undef do_close
+#undef seed
+
 #include <ctype.h>
 #include <stdio.h>
+#include <opencv/cv.h>
+#include <opencv/highgui.h>
 #include <opencv2/imgcodecs/imgcodecs_c.h>
 #include <opencv2/imgproc/imgproc_c.h>
 
@@ -28,7 +48,7 @@ new(class)
     OUTPUT:
         RETVAL
 
-SV *
+IplImage *
 xs_createImage(self,width,height,IPL_DEPTH,Channel)
         SV *self;
         int width;
@@ -37,31 +57,19 @@ xs_createImage(self,width,height,IPL_DEPTH,Channel)
         int Channel;
     PREINIT:
         IplImage *img;
-        SV *image;
     CODE:
-        img = cvCreateImage(cvSize(width,height),IPL_DEPTH,Channel);
-        image = newSViv(PTR2IV(img));
-        image = newRV_noinc(image);
-        RETVAL = image;
+        RETVAL = cvCreateImage(cvSize(width,height),IPL_DEPTH,Channel);
     OUTPUT:
         RETVAL
 
-SV *
+IplImage *
 xs_loadImage(self,filename)
         SV *self;
         char *filename;
     PREINIT:
         IplImage *img;
-        SV *image;
     CODE:
-        img = cvLoadImage (filename, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
-        if(img){
-            image = newSViv(PTR2IV(img));
-            image = newRV_noinc(image);
-            RETVAL = image;
-        }else{
-            RETVAL = newSVuv(0);
-        }
+        RETVAL = cvLoadImage (filename, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
     OUTPUT:
         RETVAL
 
@@ -96,7 +104,6 @@ xs_getWidth(self,image)
         SV *image;
     PREINIT:
         IplImage *input;
-        SV *outImage;
     CODE:
         input = INT2PTR(IplImage *, SvIV(SvRV(image)));
         RETVAL = newSVuv(input->width);
@@ -112,6 +119,30 @@ xs_getHeight(self,image)
     CODE:
         input = INT2PTR(IplImage *, SvIV(SvRV(image)));
         RETVAL = newSVuv(input->height);
+    OUTPUT:
+        RETVAL
+
+SV *
+xs_getDepth(self,image)
+        SV *self;
+        SV *image;
+    PREINIT:
+        IplImage *input;
+    CODE:
+        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
+        RETVAL = newSVuv(input->depth);
+    OUTPUT:
+        RETVAL
+
+SV *
+xs_getChannels(self,image)
+        SV *self;
+        SV *image;
+    PREINIT:
+        IplImage *input;
+    CODE:
+        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
+        RETVAL = newSVuv(input->nChannels);
     OUTPUT:
         RETVAL
 
@@ -138,43 +169,17 @@ xs_addBorder(self,image)
     OUTPUT:
         RETVAL
 
-SV *
-xs_split(self,image,channels)
+int
+xs_split(self,image,red,green,blue,alpha)
         SV *self;
-        SV *image;
-        SV *channels;
-    PREINIT:
-        IplImage *img,*red_chan,*green_chan,*blue_chan,*alpha_chan;
-        AV *ret;
-        SV *red,*green,*blue,*alpha;
+        IplImage *image;
+        IplImage *red;
+        IplImage *green;
+        IplImage *blue;
+        IplImage *alpha;
     CODE:
-        img = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        if ( img->nChannels == 1 ){
-            av_push (ret, image);
-        } else {
-            red_chan = cvCreateImage(cvSize(img->width,img->height),img->depth,1);
-            green_chan = cvCreateImage(cvSize(img->width,img->height),img->depth,1);
-            blue_chan = cvCreateImage(cvSize(img->width,img->height),img->depth,1);
-            alpha_chan = cvCreateImage(cvSize(img->width,img->height),img->depth,1);
-            cvSplit(img,red_chan,green_chan,blue_chan,alpha_chan);
-            red = newSViv(PTR2IV(red_chan));
-            red = newRV_noinc(red);
-            av_push (ret, red);
-            green = newSViv(PTR2IV(green_chan));
-            green = newRV_noinc(green);
-            av_push (ret, green);
-            blue = newSViv(PTR2IV(blue_chan));
-            blue = newRV_noinc(blue);
-            av_push (ret, blue);
-            if (img->nChannels == 4) {
-                alpha = newSViv(PTR2IV(alpha_chan));
-                alpha = newRV_noinc(alpha);
-                av_push (ret, alpha);
-            }
-        }
-        RETVAL = newRV((SV *)ret);
-    OUTPUT:
-        RETVAL
+        printf("%d\n",image->nChannels);
+        cvSplit(image,red,green,blue,NULL);
 
 SV *
 xs_blur(self,image,x,y);

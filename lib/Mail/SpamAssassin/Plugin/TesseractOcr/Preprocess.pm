@@ -8,6 +8,23 @@ use Carp qw(croak);
 
 our $VERSION = '1.1.0';
 
+require Exporter;
+our @ISA = qw(Exporter);
+
+our @EXPORT_OK = qw (
+    createImage
+    loadImage
+    saveImage
+    releaseImage
+    getWidth
+    getHeight
+    getDepth
+    getChannels
+    size
+);
+
+our @EXPORT = ();
+
 BEGIN {
     my $VERSION = '1.1.0';
     require XSLoader;
@@ -90,6 +107,24 @@ sub getHeight {
     return $ret;
 }
 
+sub getDepth {
+    my ($self,$image) = @_;
+    if( !defined($image) ){
+        croak('arguments undefined.');
+    }
+    my $ret = $self->xs_getDepth($image);
+    return $ret;
+}
+
+sub getChannels {
+    my ($self,$image) = @_;
+    if( !defined($image) ){
+        croak('arguments undefined.');
+    }
+    my $ret = $self->xs_getChannels($image);
+    return $ret;
+}
+
 sub addBorder {
     my ($self,$image) = @_;
     if ( !defined($image) ) {
@@ -100,11 +135,11 @@ sub addBorder {
 }
 
 sub split {
-    my ($self,$image,$channels) = @_;
+    my ($self,$image,$red,$green,$blue,$alpha) = @_;
     if ( !defined($image) ) {
         croak('arguments undefined.');
     }
-    $self->xs_split($image,$channels);
+    $self->xs_split($image,$red,$green,$blue,$alpha);
     return;
 }
 
