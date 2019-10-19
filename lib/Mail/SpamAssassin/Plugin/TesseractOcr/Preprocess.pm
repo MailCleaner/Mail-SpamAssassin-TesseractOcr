@@ -20,7 +20,7 @@ our @EXPORT_OK = qw (
     getHeight
     getDepth
     getChannels
-    size
+    toGray
 );
 
 our @EXPORT = ();
@@ -35,9 +35,6 @@ BEGIN {
 
 sub convert {
     my ($self, $in, $out) = @_;
-    if ( !defined($in) || !defined($out) ) {
-        croak('arguments undefined.');
-    }
     my $pp = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->new();
     my $ii = $pp->loadImage($in);
     my $err = $pp->saveImage($out,$ii);
@@ -47,9 +44,6 @@ sub convert {
 
 sub preprocess {
     my ($self, $in, $out) = @_;
-    if ( !defined($in) || !defined($out) ) {
-        croak('arguments undefined.');
-    }
     my $pp = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->new();
     my $ii = $pp->loadImage($in);
 
@@ -61,104 +55,58 @@ sub preprocess {
 }
 
 sub createImage {
-    my ($self, $width, $height, $IPL_DEPTH, $Channel) = @_;
-    if( !defined($width) || !defined($height) || !defined($IPL_DEPTH) || !defined($Channel) ){
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_createImage($width,$height,$IPL_DEPTH,$Channel);
-
-    return $ret;
+    my ($self, $width, $height, $depth, $channels) = @_;
+    return &cvCreateImage($width,$height,$depth,$channels);
 }
 
 sub loadImage {
     my ($self, $filename) = @_;
-    my $img = $self->xs_loadImage($filename);
+    return &cvLoadImage($filename);
 }
 
 sub saveImage {
     my ($self, $filename, $image) = @_;
-    my $ret = $self->xs_saveImage($filename,$image);
-}
-
-sub releaseImage {
-    my ($self,$image) = @_;
-    if ( !defined($image) ) {
-        croak('arguments undefined.');
-    }
-    $self->xs_releaseImage($image);
-    return;
+    &cvSaveImage($filename,$image,0);
 }
 
 sub getWidth {
     my ($self,$image) = @_;
-    if( !defined($image) ){
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_getWidth($image);
-    return $ret;
+    return &cvGetWidth($image);
 }
 
 sub getHeight {
     my ($self,$image) = @_;
-    if( !defined($image) ){
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_getHeight($image);
-    return $ret;
+    return &cvGetHeight($image);
 }
 
 sub getDepth {
     my ($self,$image) = @_;
-    if( !defined($image) ){
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_getDepth($image);
-    return $ret;
+    return &cvGetDepth($image);
 }
 
 sub getChannels {
     my ($self,$image) = @_;
-    if( !defined($image) ){
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_getChannels($image);
-    return $ret;
+    return &cvGetChannels($image);
 }
 
 sub addBorder {
     my ($self,$image) = @_;
-    if ( !defined($image) ) {
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_addBorder($image);
-    return $ret;
+    return &cvAddBorder($image);
 }
 
 sub split {
-    my ($self,$image,$red,$green,$blue,$alpha) = @_;
-    if ( !defined($image) ) {
-        croak('arguments undefined.');
-    }
-    $self->xs_split($image,$red,$green,$blue,$alpha);
-    return;
+    my ($self,$image,$red,$green,$blue) = @_;
+    &cvSplit($image,$red,$green,$blue,undef);
 }
 
 sub blur {
     my ($self,$image,$x,$y) = @_;
-    if ( !defined($image) || !defined($x) || !defined($y) ) {
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_blur($image,$x,$y);
-    return $ret;
+    return &cvBlur($image,$x,$y);
 }
 
-sub convertToGray {
+sub toGray {
     my ($self,$image) = @_;
-    if ( !defined($image) ) {
-        croak('arguments undefined.');
-    }
-    my $ret = $self->xs_convertToGray($image);
-    return $ret;
+    return &cvToGray($image);
 }
 
 1;

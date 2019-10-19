@@ -35,161 +35,84 @@ MODULE = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess   PACKAGE = Mail::
 PROTOTYPES: ENABLE
 
 SV *
-new(class)
-        SV *class;
+new(SV *class)
     PREINIT:
         SV *self;
     CODE:
         self = newSViv(1);
         self = newRV_noinc(self);
-
         sv_bless(self, gv_stashpv(SvPV_nolen(class), 1));
         RETVAL = self;
     OUTPUT:
         RETVAL
 
 IplImage *
-xs_createImage(self,width,height,IPL_DEPTH,Channel)
-        SV *self;
-        int width;
-        int height;
-        int IPL_DEPTH;
-        int Channel;
+cvCreateImage(int height, int width, int depth, int channels)
     PREINIT:
-        IplImage *img;
+        IplImage *image;
+        CvSize size;
     CODE:
-        RETVAL = cvCreateImage(cvSize(width,height),IPL_DEPTH,Channel);
+        size = cvSize(height,width);
+        RETVAL = cvCreateImage(size, depth, channels);
     OUTPUT:
         RETVAL
 
 IplImage *
-xs_loadImage(self,filename)
-        SV *self;
-        char *filename;
-    PREINIT:
-        IplImage *img;
-    CODE:
-        RETVAL = cvLoadImage (filename, CV_LOAD_IMAGE_ANYDEPTH | CV_LOAD_IMAGE_ANYCOLOR);
-    OUTPUT:
-        RETVAL
-
-SV *
-xs_saveImage(self,filename,image)
-        SV *self;
-        char *filename;
-        SV *image;
-    PREINIT:
-        IplImage *img;
-        int i;
-    CODE:
-        img = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        i = cvSaveImage(filename, img, 0);
-        RETVAL = newSVuv(i);
-    OUTPUT:
-        RETVAL
+cvLoadImage(char *filename, int iscolor=CV_LOAD_IMAGE_COLOR)
 
 void
-xs_releaseImage(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *img;
-    CODE:
-        img = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        cvReleaseImage(&img);
+cvSaveImage(char *filename, IplImage *image, const int *params)
 
-SV *
-xs_getWidth(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *input;
+int
+cvGetWidth(IplImage *image)
     CODE:
-        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        RETVAL = newSVuv(input->width);
-    OUTPUT:
-        RETVAL
-
-SV *
-xs_getHeight(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *input;
-    CODE:
-        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        RETVAL = newSVuv(input->height);
-    OUTPUT:
-        RETVAL
-
-SV *
-xs_getDepth(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *input;
-    CODE:
-        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        RETVAL = newSVuv(input->depth);
-    OUTPUT:
-        RETVAL
-
-SV *
-xs_getChannels(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *input;
-    CODE:
-        input = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        RETVAL = newSVuv(input->nChannels);
-    OUTPUT:
-        RETVAL
-
-SV *
-xs_addBorder(self,image)
-        SV *self;
-        SV *image;
-    PREINIT:
-        IplImage *before;
-        IplImage *after;
-        CvPoint offset;
-        int type;
-        CvScalar color;
-    CODE:
-        before = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        after = cvCreateImage(cvSize(before->width+100,before->height+100),before->depth,3);
-        type = 0;
-        color = cvScalarAll(255);
-        offset.x = offset.y = 50;
-        cvCopyMakeBorder(before,after,offset,type,color);
-        image = newSViv(PTR2IV(after));
-        image = newRV_noinc(image);
-        RETVAL = image;
+        RETVAL = image->width;
     OUTPUT:
         RETVAL
 
 int
-xs_split(self,image,red,green,blue,alpha)
-        SV *self;
-        IplImage *image;
-        IplImage *red;
-        IplImage *green;
-        IplImage *blue;
-        IplImage *alpha;
+cvGetHeight(IplImage *image)
     CODE:
-        printf("%d\n",image->nChannels);
-        cvSplit(image,red,green,blue,NULL);
+        RETVAL = image->height;
+    OUTPUT:
+        RETVAL
 
-SV *
-xs_blur(self,image,x,y);
-        SV *self;
-        SV *image;
-        int x;
-        int y;
+int
+cvGetDepth(IplImage *image)
+    CODE:
+        RETVAL = image->depth;
+    OUTPUT:
+        RETVAL
+
+int
+cvGetChannels(IplImage *image)
+    CODE:
+        RETVAL = image->nChannels;
+    OUTPUT:
+        RETVAL
+
+IplImage *
+cvAddBorder(SV *self, IplImage *image)
     PREINIT:
-        IplImage *before;
-        IplImage *after;
+        IplImage *output;
+        CvPoint offset;
+        CvScalar color;
+    CODE:
+        output = cvCreateImage(cvSize(image->width+100,image->height+100),image->depth,image->nChannels);
+        color = cvScalarAll(255);
+        offset.x = offset.y = 50;
+        cvCopyMakeBorder(image,output,offset,0,color);
+        RETVAL = output;
+    OUTPUT:
+        RETVAL
+
+void
+cvSplit(IplImage *image,IplImage *red,IplImage *green,IplImage *blue, NULL)
+
+IplImage *
+cvBlur(IplImage *image,int x,int y);
+    PREINIT:
+        IplImage *output;
         int method;
         double sigma1;
         double sigma2;
@@ -197,33 +120,27 @@ xs_blur(self,image,x,y);
         method = 1; // CV_BLUR
         sigma1 = 0;
         sigma2 = 0;
-        before = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        after = cvCreateImage(cvSize(before->width,before->height),before->depth,before->nChannels);
-        cvSmooth ( before, after, method, x, y, sigma1, sigma2 );
-        image = newSViv(PTR2IV(after));
-        image = newRV_noinc(image);
-        RETVAL = image;
+        output = cvCreateImage(cvSize(image->width,image->height),image->depth,image->nChannels);
+        cvSmooth ( image, output, method, x, y, sigma1, sigma2 );
+        RETVAL = output;
     OUTPUT:
         RETVAL
 
-SV *
-xs_convertToGray(self,image)
-        SV *self;
-        SV *image;
+void
+cvCvtColor (IplImage *image, IplImage *output, CV_BGR2GRAY)
+
+IplImage *
+cvToGray(IplImage *image)
     PREINIT:
-        IplImage *before;
-        IplImage *after;
+        IplImage *output;
     CODE:
-        before = INT2PTR(IplImage *, SvIV(SvRV(image)));
-        after = cvCreateImage(cvSize(before->width,before->height),before->depth,1);
-        if(before->nChannels == 1 ){
-            cvCopy(before,after,NULL);
-        }else{
-            cvCvtColor ( before, after, CV_BGR2GRAY);
+        if ( image->nChannels == 1 ) {
+            RETVAL = image;
+        } else {
+            output = cvCreateImage(cvSize(image->width,image->height),image->depth,1);
+            cvCvtColor ( image, output, CV_BGR2GRAY);
+            RETVAL = output;
         }
-        image = newSViv(PTR2IV(after));
-        image = newRV_noinc(image);
-        RETVAL = image;
     OUTPUT:
         RETVAL
 
