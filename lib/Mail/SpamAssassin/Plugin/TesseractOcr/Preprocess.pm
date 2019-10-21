@@ -21,6 +21,7 @@ our @EXPORT_OK = qw (
     getDepth
     getChannels
     toGray
+    edges
 );
 
 our @EXPORT = ();
@@ -107,6 +108,18 @@ sub blur {
 sub toGray {
     my ($self,$image) = @_;
     return &cvToGray($image);
+}
+
+sub toBlack {
+    my ($self,$image) = @_;
+    &cvToGray($image);
+}
+
+sub edges {
+    my ($self,$in,$out) = @_;
+    &cvZero($out);
+    &cvCanny($in,$out,20.0,25.0,3);
+    return $out;
 }
 
 1;

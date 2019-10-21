@@ -92,7 +92,7 @@ cvGetChannels(IplImage *image)
         RETVAL
 
 IplImage *
-cvAddBorder(SV *self, IplImage *image)
+cvAddBorder(IplImage *image)
     PREINIT:
         IplImage *output;
         CvPoint offset;
@@ -141,6 +141,30 @@ cvToGray(IplImage *image)
             cvCvtColor ( image, output, CV_BGR2GRAY);
             RETVAL = output;
         }
+    OUTPUT:
+        RETVAL
+
+void
+cvZero(IplImage *image)
+
+void
+cvCopy(IplImage *in, IplImage *out, NULL)
+
+void
+cvCanny(const IplImage *before, IplImage *after, double min, double max, int kernel = 3)
+    POSTCALL:
+        ST(0) = ST(1);
+        XSRETURN(1);
+
+IplImage *
+old_cvEdges (IplImage *image)
+    PREINIT:
+        IplImage *output;
+    CODE:
+        output = cvCreateImage(cvSize(image->width,image->height),image->depth,image->nChannels);
+        cvZero(output);
+        cvCanny(image,output,50,200,3);
+        RETVAL = output;
     OUTPUT:
         RETVAL
 
