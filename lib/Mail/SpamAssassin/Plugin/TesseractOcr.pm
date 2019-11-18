@@ -386,34 +386,33 @@ sub tesseract_do {
             Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode($self);
             my $timer = Mail::SpamAssassin::Timeout->new( { secs => $self->{main}->{conf}->{tocr_img_timeout} } );
             my $out;
+            my $success = 0;
             my $err;
 
             # If Preprocessing is enabled, do so
             if ($self->{main}->{conf}->{tocr_preprocess}) {
                 $out = "$fullpath-pp.tif";
                 dbg("TesseractOcr: Preprocessing $fullpath; storing result as $out");
-                $err = $timer->run_and_catch(Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess::preprocess($fullpath,$out);
-
-            # If Preprocessing is NOT enabled, just convert it to TIF
-            } else {
+                $err = $timer->run_and_catch($success = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess::preprocess($fullpath,$out));
+            }
+            # If Preprocessing failed, or NOT enabled, convert to TIF
+            unless ($success) {
                 # Skip if it is already a TIF
                 if ($ext =~ 'tif') {
                     dbg("TesseractOcr: Image is already a tif, not converting");
                 } else {
-                    # CONVERT
                     $out = "$fullpath-cv.tif";
-
                     dbg("TesseractOcr: Converting $fullpath to $out");
-                    $err = $timer->run_and_catch(Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess::convert($fullpath,$out);
+                    $err = $timer->run_and_catch(Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess::convert($fullpath,$out));
                 }
             }
 
             if ($err) {
-                dbg("TessoractOcr: Failed to convert/process $out: $_");
+                dbg("TessoractOcr: Failed to convert/process $out: $err");
                 dbg("TessoractOcr: Removing unconverted file $fullpath");
                 unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after failed conversion: $!");
                 next;
-            } elsif (! $ext =~ 'tif') {
+            } elsif (! $ext =~ 'tif' || $success ) {
                 dbg("TessoractOcr: Successfully converted/processed $out");
                 dbg("TessoractOcr: Removing unconverted file $fullpath");
                 unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after conversion: $!");
