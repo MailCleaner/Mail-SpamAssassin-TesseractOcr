@@ -1,6 +1,6 @@
 MANIFEST
 Makefile.PL
-preprocess.xs
+Preprocess.xs
 README.md
 TesseractOcr.cf
 lib/Mail/SpamAssassin/Plugin/TesseractOcr.pm

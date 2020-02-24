@@ -6,7 +6,7 @@ use warnings;
 use vars qw($VERSION @ISA @EXPORT);
 use Carp qw(croak);
 
-our $VERSION = '1.1.0';
+our $VERSION = '3.00';
 
 require Exporter;
 our @ISA = qw(Exporter);
@@ -15,7 +15,7 @@ our @EXPORT_OK = qw (
     createImage
     loadImage
     saveImage
-    release
+    releaseImage
     getWidth
     getHeight
     getDepth
@@ -24,7 +24,6 @@ our @EXPORT_OK = qw (
     toColor
     edges
     contours
-    isolate
     convert
     preprocess
 );
@@ -32,7 +31,7 @@ our @EXPORT_OK = qw (
 our @EXPORT = ();
 
 BEGIN {
-    my $VERSION = '1.1.0';
+    my $VERSION = '3.00';
     require XSLoader;
     XSLoader::load(__PACKAGE__,$VERSION);
     require Exporter;
@@ -42,10 +41,15 @@ BEGIN {
 sub convert {
     my ($self, $in, $out) = @_;
     my $pp = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->new();
+
+    # Open Image
     my $ii = $pp->loadImage($in);
-    my $err = $pp->saveImage($out,$ii);
+
+    # Store with new name
+    $pp->saveImage($out,$ii);
+
+    # Release Image
     $pp->releaseImage($ii);
-    return $err;
 }
 
 sub preprocess {
@@ -84,18 +88,27 @@ sub preprocess {
         $edge = $pp->edges($channels[$i],$edge);
         $edges = $pp->merge($edges,$edge);
     }
+    # Slight blur to merge edges
     $edges = $pp->blur($edges,2,2);
 
     # Find the contours
     my $contours = $pp->contours($edges);
 
+    # Greyscale and Invert on order to isolate text
     $ii = $pp->toGray($ii);
     $ii = $pp->invert($ii);
+
+    # Mask all uninteresting content
     $ii = $pp->mask($ii,$contours);
+
+    # Set mask back to white
     $ii = $pp->invert($ii);
 
-    my $success = $pp->saveImage($out,$ii);
-    return $success;
+    # Store with new name
+    $pp->saveImage($out,$ii);
+
+    # Release Image
+    $pp->releaseImage($ii);
 }
 
 sub createImage {
@@ -112,7 +125,6 @@ sub saveImage {
     my ($self, $filename, $image) = @_;
     my $params = 0;
     &cvSaveImage($filename,$image,\$params);
-    print "--- $filename\n";
     if ( -e $filename ) {
         return 1;
     } else {

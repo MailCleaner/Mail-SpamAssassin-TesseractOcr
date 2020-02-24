@@ -27,7 +27,6 @@ extern "C" {
 #include <stdio.h>
 #include <opencv/cv.h>
 #include <opencv/highgui.h>
-#include <opencv2/imgcodecs/imgcodecs_c.h>
 #include <opencv2/imgproc/imgproc_c.h>
 
 MODULE = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess   PACKAGE = Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess
