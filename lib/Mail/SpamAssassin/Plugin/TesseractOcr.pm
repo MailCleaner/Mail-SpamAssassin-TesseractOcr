@@ -14,10 +14,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # </@LICENSE>
-
-# TesseractOcr plugin, version 1.0.0
 #
-# Copyright 2019 - Fastnet SA
+# TesseractOcr plugin, version 4.00
+#
+# Copyright 2020 - Fastnet SA
 # Written by John Mertz (john.mertz@mailcleaner.net)
 
 =head1 NAME
@@ -26,7 +26,7 @@ Mail::SpamAssassin::Plugin::TesseractOcr - Optical Character Recognition
 
 =head1 VERSION
 
-Version 1.0.0
+Version 4.00
 
 =head1 SYNOPSIS
 
@@ -57,13 +57,13 @@ John Mertz C<< <john.mertz at mailcleaner.net> >>
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2019 Fastnet SA
+Copyright 2020 Fastnet SA
 
 This program is released under the Apache Software License, Version 2.0
 
 =cut
 
-our $VERSION = '1.0.0';
+our $VERSION = '4.00';
 
 package Mail::SpamAssassin::Plugin::TesseractOcr;
 
@@ -77,6 +77,7 @@ use Mail::SpamAssassin::Logger;
 use Mail::SpamAssassin::Util;
 use Mail::SpamAssassin::Timeout;
 use Mail::SpamAssassin::Message::Node qw( find_parts );
+use Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess qw( convert preprocess );
 
 use vars qw(@ISA);
 @ISA = qw(Mail::SpamAssassin::Plugin);
@@ -86,7 +87,6 @@ our ($tmpfile, $tmpdir);
 
 # Verify non-perl dependencies
 our $TESSERACT = Mail::SpamAssassin::Util::find_executable_in_env_path('tesseract') or die "Could not find 'tesseract' executable. You may need to install this package.\n";
-our $CONVERT = Mail::SpamAssassin::Util::find_executable_in_env_path('convert') or die "Could not find 'convert' executable. You may need to install this package.\n";
 
 sub new {
     my $class = shift;
@@ -110,7 +110,7 @@ sub set_config {
 
 =head1 USER OPTIONS
 
-=item tocr_enabled (0|1)                    (default: 1)
+=item tocr_enabled (0|1)                        (default: 1)
 
 Whether to use TesseractOcr, if it is available.
 
@@ -120,6 +120,42 @@ Whether to use TesseractOcr, if it is available.
         setting => 'tocr_enable',
         default => 1,
         type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+=item tocr_preprocess (0|1)                     (default: 1)
+
+Whether to do image preprocessing to improve accuracy, or just convert to TIF.
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_preprocess',
+        default => 1,
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_BOOL
+    });
+
+=item tocr_data_dir (string)                    (default: $ENV{TESSDATA_PREFIX}/tessdata)
+
+Directory containing tessdata (--tessdata-dir option)
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_data_dir',
+        default => '$ENV{TESSDATA_PREFIX}/tessdata',
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_STRING
+    });
+
+=item tocr_langs                                (default: eng)
+
+Language(s) to enable (-l option; format: 'eng' or 'eng+fra')
+
+=cut
+
+    push (@cmds, {
+        setting => 'tocr_langs',
+        default => 'eng',
+        type => $Mail::SpamAssassin::Conf::CONF_TYPE_STRING
     });
 
 =item tocr_msg_timeout                          (default: 15)
@@ -253,7 +289,7 @@ time to OCR and are also somewhat less likely to contain text.
         type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
     });
 
-=item tocr_min_area                         (default: 512)
+=item tocr_min_area                             (default: 512)
 
 Minimum image area (pixels). Small images are unlikely to contain
 OCR-friendly text.
@@ -266,7 +302,7 @@ OCR-friendly text.
         type => $Mail::SpamAssassin::Conf::CONF_TYPE_NUMERIC
     });
 
-=item tocr_max_area                         (default: 2073600)
+=item tocr_max_area                             (default: 2073600)
 
 Maximum image area (pixels). Large images can take a long time to
 OCR and are also somewhat less likely to contain text.
@@ -302,16 +338,8 @@ sub post_message_parse {
 
     # Handle timout
     if ($t->timed_out()) {
-        dbg("TesseractOcr: Scan timed out");
-        my ($ret, $pid) = kill_pid();
+        dbg("TesseractOcr: Per message timeout reached");
         clean_up();
-        if ($ret > 0) {
-            dbg("TesseractOcr: Successfully killed PID $pid");
-        } elsif ($ret < 0) {
-            dbg("TesseractOcr: No processes left... exiting");
-        } else {
-            dbg("TesseractOcr: Failed to kill PID $pid, stale process!");
-        }
         return 0;
     }
 
@@ -370,69 +398,63 @@ sub tesseract_do {
             print PICT $d or dbg("TesseractOcr: Cannot write $fullpath: $!");
             close PICT;
 
+            # Prepare image for scanning
             Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode($self);
             my $timer = Mail::SpamAssassin::Timeout->new( { secs => $self->{main}->{conf}->{tocr_img_timeout} } );
-            # Convert to TIF, if not already
-            unless ($ext =~ 'tif') {
-                # CONVERT
-                my $out = "$fullpath.tif";
-                $tmpfile .= ".tif";
+            my $out;
+            my $err;
 
-                dbg("TesseractOcr: Converting $fullpath to $out");
-                my @args = ( $fullpath, '-compress','none','+matte', $out );
-
-                Mail::SpamAssassin::PerMsgStatus::enter_helper_run_mode();
-                my $pid;
-                my ($line,$inbuf);
-                my $err = $timer->run_and_catch(sub {
-                    $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*CONVERT, undef, 1, $CONVERT, @args);
-                    if (!defined $pid) {
-                        return "Failed to open pipe for convert command";
-                    } else {
-                        while ($line = read(CONVERT,$inbuf,8192)) {
-                            dbg("TesseractOcr: CONVERT DEBUG $line");
-                        }
-                        unless (defined $line) {
-                            return "TesseractOcr: Error reading from pipe: $!";
-                        }
-
-                        my $errno = 0;
-                        close CONVERT or $errno = $!;
-                        if (Mail::SpamAssassin::Util::proc_status_ok($?,$errno)) {
-                            dbg("TesseractOcr: convert pid $pid finished successfully.");
-                            return 1;
-                        } elsif (Mail::SpamAssassin::Util::proc_status_ok($?,$errno,0,1)) {
-                            dbg("TesseractOcr: convert pid $pid finished: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
-                            return 1;
-                        } else {
-                            dbg("TesseractOcr: convert pid $pid failed: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
-                            return 0;
-                        }
-                    }
-                });
-                Mail::SpamAssassin::PerMsgStatus::leave_helper_run_mode($self);
-
+            # If Preprocessing is enabled, do so
+            if ($self->{main}->{conf}->{tocr_preprocess}) {
+                $out = "$fullpath-pp.tif";
+                dbg("TesseractOcr: Preprocessing $fullpath; storing result as $out");
+                $err = $timer->run_and_catch(sub {Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->preprocess($fullpath,$out)});
                 if ($err) {
-                    dbg("TessoractOcr: Failed to convert $fullpath: $_");
-                    dbg("TessoractOcr: Removing unconverted file $fullpath");
-                    unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after failed conversion: $!");
-                    next;
-                } else {
-                    dbg("TessoractOcr: Successfully converted $fullpath to $out");
-                    dbg("TessoractOcr: Removing unconverted file $fullpath");
-                    unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after conversion: $!");
-                    $fullpath = $out;
+                    dbg("TesseractOcr: Failed to preprocess: $err");
                 }
             }
 
+            # If Preprocessing failed or not enabled, convert
+            if (defined $err || !$self->{main}->{conf}->{tocr_preprocess}) {
+                # Skip if it is already a TIF
+                if ($ext =~ 'tif') {
+                    dbg("TesseractOcr: Image is already a tif, not converting");
+                    $err = undef;
+                } else {
+                    $out = "$fullpath-cv.tif";
+                    dbg("TesseractOcr: Converting $fullpath to $out");
+                    $err = $timer->run_and_catch(sub {Mail::SpamAssassin::Plugin::TesseractOcr::Preprocess->convert($fullpath,$out)});
+                    if ($err) {
+                        dbg("TessoractOcr: Failed to convert $out: $err");
+                    }
+                }
+            }
+
+            # If convert failed, move on
+            if (defined $err) {
+                unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after failed conversion: $!");
+                next;
+            } else {
+                unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath after preprocessing/conversion: $!");
+                $fullpath = $out;
+            }
+
             # Scan TIF and render results
-            # SCAN
             my ($pid, $content);
             my @args = ( $fullpath, 'stdout' );
-            my $err = $timer->run_and_catch(sub {
+            dbg("TesseractOcr: Scanning $fullpath");
+            if (defined $self->{main}->{conf}->{tocr_data_dir}) {
+                push @args, '--tessdata-dir';
+                push @args, Mail::SpamAssassin::Util::untaint_file_path($self->{main}->{conf}->{tocr_data_dir});
+            }
+            if (defined $self->{main}->{conf}->{tocr_langs}) {
+                push @args, '-l';
+                push @args, Mail::SpamAssassin::Util::untaint_file_path($self->{main}->{conf}->{tocr_langs});
+            }
+            $err = $timer->run_and_catch(sub {
                 my ($inbuf, $line);
                 $content = '';
-                $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*TESSERACT, undef, 1, $TESSERACT, @args);
+                $pid = Mail::SpamAssassin::Util::helper_app_pipe_open(*TESSERACT, undef, 0, $TESSERACT, @args);
                 if (!defined $pid) {
                     return "Failed to open pipe for tesseract command";
                 } else {
@@ -457,11 +479,11 @@ sub tesseract_do {
                         dbg("TesseractOcr: tesseract pid $pid failed: " . Mail::SpamAssassin::Util::exit_status_str($?,$errno));
                     }
                 }
-                });
+            });
             Mail::SpamAssassin::PerMsgStatus::leave_helper_run_mode($self);
             if ($timer->timed_out()) {
                 dbg("TesseractOcr: Per image timeout reached for $tmpfile");
-                cleanup();
+                clean_up();
                 next;
             }
 
@@ -474,6 +496,7 @@ sub tesseract_do {
 
             # Clean up
             dbg("TesseractOcr: Cleaning up temporary file: $fullpath");
+            unlink $fullpath or dbg("TesseractOcr: Failed to remove $fullpath: $!");
             clean_up();
 
         }

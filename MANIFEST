@@ -1,0 +1,7 @@
+MANIFEST
+Makefile.PL
+Preprocess.xs
+README.md
+TesseractOcr.cf
+lib/Mail/SpamAssassin/Plugin/TesseractOcr.pm
+lib/Mail/SpamAssassin/Plugin/TesseractOcr/Preprocess.pm
